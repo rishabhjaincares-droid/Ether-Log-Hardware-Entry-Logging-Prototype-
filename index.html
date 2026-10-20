@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RFID Blockchain Ledger</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom animations for new rows and notifications */
+        .fade-in { animation: fadeIn 0.5s ease-out; }
+        .slide-in { animation: slideIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        @keyframes fadeIn { from { opacity: 0; background-color: #374151; } to { opacity: 1; background-color: transparent; } }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    </style>
+</head>
+<body class="bg-gray-950 p-8 font-sans text-gray-200">
+    
+    <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2"></div>
+
+    <div class="max-w-6xl mx-auto">
+        <div class="flex justify-between items-end mb-6">
+            <div>
+                <h1 class="text-3xl font-bold text-white">RFID Security Ledger</h1>
+                <p class="text-gray-400 text-sm mt-1">Live immutable records from the ESP32 security system.</p>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="relative flex h-3 w-3">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                </span>
+                <span class="text-sm font-semibold text-gray-400 tracking-wide">SYSTEM LIVE</span>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div class="bg-gray-900 p-5 rounded-lg shadow-sm border-l-4 border-blue-500 transition hover:shadow-md border border-gray-800">
+                <h3 class="text-gray-500 text-xs font-bold uppercase tracking-wider">Total Blocks Secured</h3>
+                <p id="stat-total" class="text-3xl font-black text-white mt-1">0</p>
+            </div>
+            <div class="bg-gray-900 p-5 rounded-lg shadow-sm border-l-4 border-red-500 transition hover:shadow-md border border-gray-800">
+                <h3 class="text-gray-500 text-xs font-bold uppercase tracking-wider">Security Alerts</h3>
+                <p id="stat-alerts" class="text-3xl font-black text-red-500 mt-1">0</p>
+            </div>
+            <div class="bg-gray-900 p-5 rounded-lg shadow-sm border-l-4 border-green-500 transition hover:shadow-md border border-gray-800">
+                <h3 class="text-gray-500 text-xs font-bold uppercase tracking-wider">Last Active UID</h3>
+                <p id="stat-user" class="text-xl font-mono font-bold text-gray-300 mt-2">---</p>
+            </div>
+        </div>
+        
+        <div class="mb-4 flex gap-2">
+            <button onclick="setFilter('ALL')" id="btn-ALL" class="px-4 py-2 bg-blue-600 text-white rounded shadow-sm text-sm font-bold transition hover:bg-blue-700">All History</button>
+            <button onclick="setFilter('AUTHORIZED')" id="btn-AUTH" class="px-4 py-2 bg-gray-900 text-gray-400 rounded shadow-sm text-sm font-bold transition hover:bg-gray-800 border border-gray-700">Valid Entries</button>
+            <button onclick="setFilter('ALERTS')" id="btn-ALERTS" class="px-4 py-2 bg-gray-900 text-gray-400 rounded shadow-sm text-sm font-bold transition hover:bg-gray-800 border border-gray-700">Alerts Only</button>
+        </div>
+
+        <div class="bg-gray-900 shadow-md rounded-lg overflow-hidden border border-gray-800">
+            <table class="min-w-full divide-y divide-gray-800">
+                <thead class="bg-gray-950">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Block</th>
+                        <th class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Timestamp</th>
+                        <th class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Event</th>
+                        <th class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">UID</th>
+                        <th class="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Block Hash</th>
+                    </tr>
+                </thead>
+                <tbody id="ledger-body" class="bg-gray-900 divide-y divide-gray-800">
+                    </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // Uses relative path if served by Flask, or falls back to local server if opened directly
+        const BACKEND_URL = (window.location.protocol.startsWith('http')) ? '/chain' : 'http://127.0.0.1:5000/chain'; 
+        
+        let globalChainData = [];
+        let previousChainLength = 0;
+        let currentFilter = 'ALL';
+
+        async function fetchChain() {
+            try {
+                const response = await fetch(BACKEND_URL);
+                const data = await response.json();
+                
+                globalChainData = data.chain;
+                
+                if (previousChainLength > 0 && globalChainData.length > previousChainLength) {
+                    const newBlock = globalChainData[globalChainData.length - 1];
+                    triggerToast(newBlock.data.event, newBlock.data.uid);
+                }
+                
+                previousChainLength = globalChainData.length;
+                
+                updateStats(globalChainData);
+                renderTable();
+            } catch (error) {
+                console.error("Error fetching blockchain data:", error);
+            }
+        }
+
+        function setFilter(filterType) {
+            currentFilter = filterType;
+            
+            document.querySelectorAll('button[id^="btn-"]').forEach(btn => {
+                btn.className = "px-4 py-2 bg-gray-900 text-gray-400 rounded shadow-sm text-sm font-bold transition hover:bg-gray-800 border border-gray-700";
+            });
+            
+            const activeBtn = document.getElementById(`btn-${filterType}`);
+            activeBtn.className = "px-4 py-2 bg-blue-600 text-white rounded shadow-sm text-sm font-bold transition hover:bg-blue-700 border border-transparent";
+            
+            renderTable();
+        }
+
+        function updateStats(chain) {
+            document.getElementById('stat-total').innerText = chain.length;
+            
+            let alertCount = 0;
+            let lastUID = "---";
+            
+            chain.forEach(block => {
+                const ev = block.data.event;
+                if (ev === "FORCED_ENTRY" || ev === "ACCESS_DENIED") alertCount++;
+                if (block.data.uid !== "SYSTEM" && block.data.uid !== "UNKNOWN_INTRUDER") lastUID = block.data.uid;
+            });
+            
+            document.getElementById('stat-alerts').innerText = alertCount;
+            document.getElementById('stat-user').innerText = lastUID;
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('ledger-body');
+            tbody.innerHTML = ''; 
+
+            let displayChain = [...globalChainData].reverse();
+
+            if (currentFilter === 'AUTHORIZED') {
+                displayChain = displayChain.filter(b => b.data.event === "AUTHORIZED_ENTRY");
+            } else if (currentFilter === 'ALERTS') {
+                displayChain = displayChain.filter(b => b.data.event === "FORCED_ENTRY" || b.data.event === "ACCESS_DENIED");
+            }
+
+            displayChain.forEach((block, index) => {
+                const date = new Date(block.timestamp * 1000).toLocaleString();
+                
+                // Dark mode friendly badge styling
+                let badgeClass = "bg-gray-800 text-gray-300 border border-gray-700";
+                if (block.data.event === "AUTHORIZED_ENTRY") badgeClass = "bg-green-900 text-green-400 border border-green-800";
+                if (block.data.event === "ACCESS_DENIED") badgeClass = "bg-red-900 text-red-400 border border-red-800";
+                if (block.data.event === "DOOR_OPENED") badgeClass = "bg-orange-900 text-orange-400 border border-orange-800";
+                if (block.data.event === "FORCED_ENTRY") badgeClass = "bg-red-600 text-white border border-red-700 animate-pulse";
+
+                const rowAnimation = (index === 0 && globalChainData.length > 1 && currentFilter === 'ALL') ? 'fade-in' : '';
+
+                const row = `
+                    <tr class="hover:bg-gray-800 transition ${rowAnimation}">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-500">#${block.index}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">${date}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-bold">
+                            <span class="px-2 py-1 rounded-full text-xs ${badgeClass}">${block.data.event}</span>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-mono font-bold text-gray-300">${block.data.uid}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-xs font-mono text-gray-500 truncate max-w-xs" title="${block.hash}">
+                            ${block.hash.substring(0, 20)}...
+                        </td>
+                    </tr>
+                `;
+                tbody.innerHTML += row;
+            });
+        }
+
+        function triggerToast(event, uid) {
+            const toastContainer = document.getElementById('toast-container');
+            
+            let bgColor = "bg-gray-800 border border-gray-700";
+            if (event === "FORCED_ENTRY" || event === "ACCESS_DENIED") bgColor = "bg-red-900 border border-red-700";
+            if (event === "AUTHORIZED_ENTRY") bgColor = "bg-green-900 border border-green-700";
+
+            const toast = document.createElement('div');
+            toast.className = `slide-in ${bgColor} text-white px-6 py-4 rounded shadow-lg flex items-center gap-3`;
+            toast.innerHTML = `
+                <div>
+                    <p class="font-bold text-sm">New Event Detected</p>
+                    <p class="text-xs opacity-90">${event} | ${uid}</p>
+                </div>
+            `;
+            
+            toastContainer.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(100%)';
+                toast.style.transition = 'all 0.5s ease';
+                setTimeout(() => toast.remove(), 500);
+            }, 4000);
+        }
+
+        fetchChain();
+        setInterval(fetchChain, 3000);
+    </script>
+</body>
+</html>

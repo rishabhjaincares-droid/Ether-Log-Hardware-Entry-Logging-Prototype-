@@ -1,0 +1,22 @@
+# Python Virtual Environments
+.venv/
+.venv-1/
+venv/
+env/
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+
+# Environment & Secret files
+.env
+.env.local
+sketch_jul06a/secrets.h
+
+# IDE and OS files
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
